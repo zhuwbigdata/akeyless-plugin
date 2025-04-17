@@ -1,0 +1,71 @@
+# For more information, see: https://docs.gitlab.com/ee/ci/yaml/README.html#stages
+variables: 
+  ACCESS_ID: <access-id>
+
+
+stages:          # List of stages for jobs, and their order of execution
+  - akeyless
+  - build
+  - test
+  - deploy
+
+
+akeyless-job:
+  stage: akeyless
+  image: 
+    name:  akeyless/ci_base:latest-alpine
+  id_tokens:
+    MY_ID_TOKEN:
+      aud: "<gateway-url>"
+  before_script:
+    - export MY_SECRET=akeyless://devops/tf/static_secret
+    - export MY_FIRST_SECRET=akeyless://devops/static-secrets/zero-knowledge-static-secret
+    - export AKEYLESS_GW_URL=<gateway-url>
+    - echo "🔐 First 100 chars of JWT (for safety):"
+    - echo "${MY_ID_TOKEN}" | cut -c1-100
+    - export TOKEN=$(akeyless auth --access-id ${ACCESS_ID} --access-type jwt --jwt ${MY_ID_TOKEN} --json --jq-expression='.token')
+    - source ~/.akeyless/akeyless_env.sh
+  script:
+   
+    - echo "Fetching Secrets is Easy [$MY_SECRET]"
+    - echo "MY_SECRET=$MY_SECRET" >> secrets.env
+    - echo "Fetching Multiple Secrets is Easy [$MY_FIRST_SECRET]"
+    - echo "MY_FIRST_SECRET=$MY_FIRST_SECRET" >> secrets.env
+  artifacts:
+    reports:
+      dotenv: secrets.env
+
+build-job:       # This job runs in the build stage, which runs first.
+  stage: build
+  dependencies:
+    - akeyless-job
+  script:
+    - env | grep MY_SECRET
+    - env | grep MY_FIRST_SECRET
+    - echo "Fetching DOWNSTREAM Secrets is Easy [$MY_SECRET]"
+    - echo "Compiling the code..."
+    - echo "Compile complete."
+
+unit-test-job:   # This job runs in the test stage.
+  stage: test    # It only starts when the job in the build stage completes successfully.
+  script:
+    - echo "Running unit tests... This will take about 60 seconds."
+    - sleep 60
+    - echo "Code coverage is 90%"
+
+lint-test-job:   # This job also runs in the test stage.
+  stage: test    # It can run at the same time as unit-test-job (in parallel).
+  script:
+    - echo "Linting code... This will take about 10 seconds."
+    - sleep 10
+    - echo "No lint issues found."
+
+deploy-job:      # This job runs in the deploy stage.
+  stage: deploy  # It only runs when *both* jobs in the test stage complete successfully.
+  dependencies:
+    - akeyless-job
+  script:
+    - echo "Fetching extra DOWNSTREAM Secrets is Easy [$MY_FIRST_SECRET]"
+    - echo "Deploying application..."
+    - echo "Application successfully deployed."
+
